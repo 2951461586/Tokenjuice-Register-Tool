@@ -128,7 +128,28 @@ class StageMixin:
     domain: str
     success_ledger: Any
     rotate_key: bool
+    confirm_session: bool
+    _site_session: Any
     log: Callable[[str], None]
+
+    # ── 站点客户端（每 worker 复用连接池）──────────────────────────────
+    def _new_site_client(self) -> TokenJuiceClient:
+        """造一个「复用连接池、但 Cookie 干净」的站点客户端。
+
+        实测：到 tokenjuice.ai 的冷连接 ~660ms、热连接 ~223ms ⇒ 每个账号新建
+        Session 会白付 ~440ms 的 TLS 握手。这里每个 worker 只建一次 Session，
+        切号时 `reset()` 清 Cookie（**不清就串号**，见 `TokenJuiceClient.reset`）。
+
+        ⚠️ 必须留在本模块：`TokenJuiceClient` 是自测的 patch 接缝
+        （`tests/support.py::offline()` 替换 `src.stages.TokenJuiceClient`）。
+        写到 `runner` 里会让 patch 落空，而生产代码看起来毫无问题。
+        """
+        if self._site_session is None:
+            import requests
+            self._site_session = requests.Session()
+        cl = TokenJuiceClient(session=self._site_session)
+        cl.reset()
+        return cl
 
     # ── 失败登记 ──────────────────────────────────────────────────────
     def _fail(self, rec: AccountRecord, stage: str, msg: str, *,
@@ -211,19 +232,24 @@ class StageMixin:
         """
         t0 = time.time()
         if not rec.email:
+            t_mb = time.time()
             rec.email = self.mail.create_mailbox(self.domain)
+            rec.timings["mailbox"] = time.time() - t_mb
             rec.key = rec.email
             rec.stages["mailbox"] = "ok"
         self.log(f"  [signup] 邮箱 {rec.email}")
 
-        cl = TokenJuiceClient()
+        cl = self._new_site_client()
         since = int(time.time() * 1000) - 5_000
+        t_send = time.time()
         try:
             r = cl.send_magic_link(rec.email)
         except TokenJuiceError as exc:
+            rec.timings["send"] = time.time() - t_send
             rec.timings["login"] = time.time() - t0
             self._fail(rec, "send", f"发信失败: {exc}")
             return None
+        rec.timings["send"] = time.time() - t_send
         if not r.ok:
             rec.timings["login"] = time.time() - t0
             self._fail(rec, "send", r.error)
@@ -251,10 +277,12 @@ class StageMixin:
             return None
 
         last: Result | None = None
+        t_verify = time.time()
         for tok in tokens:
             last = cl.verify(tok)
             if last.ok:
                 break
+        rec.timings["verify"] = time.time() - t_verify
         if last is None or not last.ok:
             rec.timings["login"] = time.time() - t0
             suffix = f"（已试 {len(tokens)} 枚候选）" if len(tokens) > 1 else ""
@@ -262,20 +290,29 @@ class StageMixin:
             return None
         rec.stages["verify"] = "ok"
 
-        me = cl.me()
-        if not me or not me.get("email"):
-            rec.timings["login"] = time.time() - t0
-            self._fail(rec, "verify",
-                       "verify 返回 204，但 /auth/me 拿不到会话 —— "
-                       "Cookie 没保存？站点改了会话形态？")
-            return None
-        rec.user["profile"] = me
-        rec.login["me_email"] = me.get("email")
-        rec.stages["me"] = "ok"
+        t_me = time.time()
+        if self.confirm_session:
+            me = cl.me()
+            rec.timings["me"] = time.time() - t_me
+            if not me or not me.get("email"):
+                rec.timings["login"] = time.time() - t0
+                self._fail(rec, "verify",
+                           "verify 返回 204，但 /auth/me 拿不到会话 —— "
+                           "Cookie 没保存？站点改了会话形态？")
+                return None
+            rec.user["profile"] = me
+            rec.login["me_email"] = me.get("email")
+            rec.stages["me"] = "ok"
+        else:
+            # 省 ~0.24s/号。会话有效性由下一步 `GET /api-key` 的 401 兜住
+            # （`stage_create_key` 会把 401 原样报出来，不会静默继续）。
+            rec.timings["me"] = 0.0
+            rec.stages["me"] = "skipped"
+            rec.login["me_email"] = rec.email
         rec.status = "registered"
         rec.timings["login"] = time.time() - t0
         self.log(f"  [login] 会话建立 ({rec.timings['login']:.1f}s) "
-                 f"me={me.get('email')}")
+                 f"me={rec.login.get('me_email')}")
         return cl
 
     # ── 阶段 2：建 key + 当场验活 ────────────────────────────────────
@@ -362,7 +399,7 @@ class StageMixin:
         # 🔴 唯一产出「可用 key」的地方 ⇒ 成功数据挂在这里写，
         # 就自动覆盖 run_batch / resume 全部调用路径。
         self.success_ledger.append(rec.to_dict())
-        self.log(f"  [api_key] {rec.api_key[:20]}… suffix={rec.api_key_suffix} "
+        self.log(f"  [api_key] key 已建 suffix={rec.api_key_suffix} "
                  f"验活={'chat' if v.get('chat_status') == 200 else 'models（降级）'}"
                  f" ({rec.timings['create_key']:.1f}s + "
                  f"{rec.timings['verify_key']:.1f}s)")

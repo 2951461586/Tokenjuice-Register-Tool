@@ -81,6 +81,10 @@ tools/verify_keys.py ─┼─→ src.runner ─→ src.stages ─→ { tokenjui
 | 验活交付判据 = `models 200` | chat 的 429/5xx 是容量问题，不是 key 失效 |
 | 429/5xx 重试后记 `inconclusive` | 实测 `/v1/models` 偶发 500，旧判据会误杀可用 key |
 | 收信走 `/api/inbox?email=` | Worker 全表只有 100 行窗口，拉列表会被邻居项目挤掉 |
+| 每个 worker 一个 clone（不是每任务） | 每号省 2 次 TLS 握手（冷 660ms vs 热 223ms） |
+| 验活 chat 优先 | chat 200 已证明「被接受 + 能出 token」，models 是冗余 RTT |
+| `/auth/me` 可关（默认开） | 随后的 `GET /api-key` 401 已能兜住会话失效 |
+| 轮询 0.5s（试过 0.3s） | 实测无收益：瓶颈是 SES 投递，不是轮询粒度 |
 
 ## 5. 测试策略
 

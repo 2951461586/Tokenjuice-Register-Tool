@@ -30,7 +30,8 @@ Token Juice（`tokenjuice.ai`）全链路注册机：**CF Worker 私域邮箱建
 ⑨ 入库          exports/ledger.jsonl（全部尝试） + result/（可用凭据）
 ```
 
-实测单号端到端 **约 5 秒**（建邮箱 0.2s / 等信 1.1s / 换会话 3.0s / 建 key 0.5s / 验活 1.5s）。
+实测单号端到端：默认 **~5.2s**；`--no-confirm-session` + 连接复用后 **~3.6s**。
+50 号 @3 并发：**63s**（47.6 号/分钟）。优化过程见 `docs/optimization-2026-10-23.md`。
 
 ## 2. 快速开始
 
@@ -40,6 +41,7 @@ cp .env.example .env        # 填 TEMPMAIL_BASE / TEMPMAIL_ADMIN_KEY / TEMPMAIL_
 python tools/run_e2e.py --doctor          # 体检：Worker /health、建邮箱、站点与网关可达性
 python tools/run_e2e.py --count 1         # 跑一个账号
 python tools/run_e2e.py --count 5 --concurrency 2
+python tools/run_e2e.py --count 50 --concurrency 3 --no-confirm-session   # 跑批（省 /auth/me）
 python tools/run_e2e.py --mode resume --email a@b.com      # 对已知邮箱重跑（丢包/过期）
 python tools/run_e2e.py --mode scan       # 只读诊断：窗口内邮件按规则分桶 + 漏网主题
 python tools/verify_keys.py               # 验收全部 key 并导出 result/
@@ -117,14 +119,24 @@ tools/selftest.py   离线自测入口（测试本体在 tools/tests/）
 依赖方向单向：`tools → runner → stages → 叶子 → config`，`stages` 不反向引用
 `runner`。详见 `docs/architecture.md`。
 
-## 6. 已验证的真实运行（2026-10-22）
+## 6. 已验证的真实运行
+
+单号（2026-10-22）：
 
 ```
-[signup] 邮箱 oai-3bc462df6da8468b@liziai.cloud
-[login]  会话建立 (3.1s) me=oai-3bc462df6da8468b@liziai.cloud
-[api_key] tj_tR3d-KK6Fk5T-sqnD… suffix=qwEU 验活=chat (0.5s + 1.4s)
+[signup] 邮箱 oai-xxxxxxxx@liziai.cloud
+[login]  会话建立 (3.1s) me=oai-xxxxxxxx@liziai.cloud
+[api_key] key 已建 suffix=xxxx 验活=chat (0.5s + 1.4s)
 status=keyed
 ```
+
+50 号 @3 并发（2026-10-23，两次）：
+
+| 版本 | 墙钟 | 单号 mean | 50/50 | 备注 |
+|---|---|---|---|---|
+| 首批 | 101 s | 5.82 s | ✅ | 无细分计时 |
+| 优化前基线 | 89 s | 5.21 s | ✅ | 加细分计时 |
+| 优化后 | **63 s** | **3.60 s** | ✅ | 连接复用 + chat 优先 + 跳过 `/auth/me` |
 
 - `verify_keys.py`：`models=200 chat=200 model=deepseek-ai/DeepSeek-V4.1-Flash-1017`
 - 轮换护栏实测：对同一账号 `--no-skip-keyed` 重跑 → `status=partial`，

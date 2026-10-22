@@ -45,13 +45,17 @@ def verify_key(key: str, *, model: str | None = None,
 
     | 字段 | 含义 |
     |---|---|
-    | `ok` | key 被网关接受（models 200）且 chat 拿到了 200 |
-    | `authenticated` | models 接口 200（key 有效） |
-    | `degraded` | key 有效，但 chat 非 200（容量/上游问题）—— **仍算可用** |
-    | `inconclusive` | models 429/5xx 重试后仍失败 —— **既不能判活也不能判死** |
-    | `status` / `chat_status` | 两层各自的 HTTP 码（0 = 没拿到响应） |
+    | `ok` | chat 拿到了 200（最强证据） |
+    | `authenticated` | key 被网关接受（chat 200，或 chat 无结论时 models 200） |
+    | `degraded` | 已认证，但 chat 非 200（容量/上游/请求体问题）—— **仍算可用** |
+    | `inconclusive` | 两层都 429/5xx/网络失败 —— **既不能判活也不能判死** |
+    | `status` / `chat_status` | 结论层/chat 的 HTTP 码（0 = 没拿到响应） |
     | `error` | 失败原因（只在确定性失败或不确定时非空） |
-    | `attempts` | 网络层/5xx 重试了几次 |
+    | `attempts` | 结论层的网络/5xx 重试次数 |
+
+    🔴 **chat 优先是实测优化**（2026-10-23）：models 452ms + chat 562ms，
+    而 chat 200 已同时证明「key 被接受」与「能出 token」⇒ 常规路径省一次 RTT。
+    chat 401/403 同样足以确定性判死；只有 429/5xx/400/网络失败才回落到 models。
 
     🔴 **`inconclusive` 是实测加出来的，不是理论洁癖**（2026-10-22 真实验收）：
     `GET /v1/models` 偶发返回 **500**（同一个 key 几分钟后连续 3 次 200）。
@@ -68,79 +72,98 @@ def verify_key(key: str, *, model: str | None = None,
         body["model"] = model
 
     t0 = time.time()
-    # ── 第 1 层：models（便宜、确定性最强）──────────────────────────
-    last: dict[str, Any] = {"ok": False, "authenticated": False, "status": 0,
-                            "error": "未执行", "elapsed": 0.0, "attempts": 0}
+    # ── 第 1 层：chat（**最强证据**；200 时完全不需要 models）──────────
+    #
+    # 为什么把 chat 放前面（2026-10-23 实测优化）：
+    #   models 452ms + chat 562ms，而 chat 200 已经证明「网关接受这个 key 且能出 token」，
+    #   此时 models 是纯冗余的一次 RTT（约 0.45s/号）。反过来，chat 401/403 也
+    #   足以确定性判死，同样不需要 models。
+    #   ⇒ 只有 chat 给出**非确定性**结果（429/5xx/400/网络）时才回落到 models
+    #     去回答「key 到底有没有被接受」。
+    chat_status = 0
+    chat_err = ""
+    for attempt in range(retries + 1):
+        try:
+            c = s.post(f"{config.API_ORIGIN}/chat/completions", headers=headers,
+                       json=body, timeout=timeout)
+        except requests.RequestException as exc:
+            chat_err = f"chat 网络失败: {type(exc).__name__}: {exc}"
+            if attempt < retries:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            break
+        el = time.time() - t0
+        if c.status_code == 200:
+            j: dict[str, Any] = {}
+            with contextlib.suppress(ValueError):
+                j = c.json() or {}
+            choice = (j.get("choices") or [{}])[0]
+            return {"ok": True, "authenticated": True, "degraded": False,
+                    "inconclusive": False, "status": 200, "chat_status": 200,
+                    "model": body["model"], "models": [],
+                    "reply": (choice.get("message") or {}).get("content", ""),
+                    "usage": j.get("usage") or {}, "elapsed": el,
+                    "attempts": attempt + 1}
+        if c.status_code in (401, 403):
+            # 明确拒绝 ⇒ 确定性结论，不重试、也不打 models
+            return {"ok": False, "authenticated": False, "degraded": False,
+                    "inconclusive": False, "status": c.status_code,
+                    "chat_status": c.status_code,
+                    "error": (c.text or "").strip()[:200] or f"HTTP {c.status_code}",
+                    "elapsed": el, "attempts": attempt + 1}
+        # 429 / 5xx / 400 …：chat 不能给结论 ⇒ 记下来，交给 models 判「认证」
+        chat_status = c.status_code
+        chat_err = (c.text or "").strip()[:200] or f"HTTP {c.status_code}"
+        break
+
+    # ── 第 2 层：models（只在 chat 不能给结论时才打）──────────────────
+    last: dict[str, Any] = {"ok": False, "authenticated": False,
+                            "degraded": False, "inconclusive": True,
+                            "status": 0, "chat_status": chat_status,
+                            "error": chat_err or "未执行",
+                            "elapsed": time.time() - t0, "attempts": 0}
     for attempt in range(retries + 1):
         try:
             r = s.get(f"{config.API_ORIGIN}/models", headers=headers,
                       timeout=timeout)
         except requests.RequestException as exc:
-            last = {"ok": False, "authenticated": False, "inconclusive": False,
-                    "status": 0,
+            last = {"ok": False, "authenticated": False, "degraded": False,
+                    "inconclusive": True, "status": 0,
+                    "chat_status": chat_status,
                     "error": f"{type(exc).__name__}: {exc}",
                     "elapsed": time.time() - t0, "attempts": attempt + 1}
             if attempt < retries:
-                time.sleep(1.0 * (attempt + 1))     # 线性退避 1s / 2s
+                time.sleep(1.0 * (attempt + 1))
                 continue
             return last
         el = time.time() - t0
         # 429 / 5xx = 网关现在读不出来 ⇒ 重试；仍失败则「不确定」，不是「key 失效」。
         if r.status_code == 429 or r.status_code >= 500:
-            last = {"ok": False, "authenticated": False, "inconclusive": True,
-                    "status": r.status_code,
-                    "error": (r.text or "").strip()[:200] or f"HTTP {r.status_code}",
+            last = {"ok": False, "authenticated": False, "degraded": False,
+                    "inconclusive": True, "status": r.status_code,
+                    "chat_status": chat_status,
+                    "error": ((r.text or "").strip()[:200]
+                              or f"HTTP {r.status_code}"),
                     "elapsed": el, "attempts": attempt + 1}
             if attempt < retries:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             return last
         if r.status_code != 200:
-            # 401/403 等明确拒绝 ⇒ 确定性结论，不重试（重试一万次还是 401）
-            return {"ok": False, "authenticated": False, "inconclusive": False,
-                    "status": r.status_code,
-                    "error": (r.text or "").strip()[:200] or f"HTTP {r.status_code}",
+            # 401/403 等明确拒绝 ⇒ 确定性结论，不重试
+            return {"ok": False, "authenticated": False, "degraded": False,
+                    "inconclusive": False, "status": r.status_code,
+                    "chat_status": chat_status,
+                    "error": ((r.text or "").strip()[:200]
+                              or f"HTTP {r.status_code}"),
                     "elapsed": el, "attempts": attempt + 1}
         models = []
         with contextlib.suppress(ValueError):
             models = [m.get("id") for m in (r.json() or {}).get("data") or []]
-        break
-    else:  # pragma: no cover —— 上面的分支必然 break 或 return
-        return last
-
-    # ── 第 2 层：chat（真打一次，拿 completion）──────────────────────
-    out: dict[str, Any] = {
-        "ok": False, "authenticated": True, "degraded": False,
-        "status": 200, "chat_status": 0,
-        "model": body["model"], "models": models, "elapsed": el,
-        "attempts": attempt + 1,
-    }
-    try:
-        c = s.post(f"{config.API_ORIGIN}/chat/completions", headers=headers,
-                   json=body, timeout=timeout)
-    except requests.RequestException as exc:
-        # 已认证但 chat 网络失败：key 本身没问题，标降级而不是判死
-        out.update(degraded=True, chat_status=0,
-                   error=f"chat 网络失败: {type(exc).__name__}: {exc}")
-        return out
-
-    out["chat_status"] = c.status_code
-    out["elapsed"] = time.time() - t0
-    if c.status_code == 200:
-        try:
-            j = c.json() or {}
-        except ValueError:
-            j = {}
-        choice = (j.get("choices") or [{}])[0]
-        out.update(ok=True, degraded=False,
-                   reply=(choice.get("message") or {}).get("content", ""),
-                   usage=j.get("usage") or {})
-        return out
-    # 429 / 5xx = 网关接受了 key，但容量或上游有问题 ⇒ 不算 key 失效
-    if c.status_code == 429 or c.status_code >= 500:
-        out.update(degraded=True,
-                   error=(c.text or "").strip()[:200] or f"HTTP {c.status_code}")
-        return out
-    # 401 / 403 等 ⇒ 确定性失败
-    out.update(error=(c.text or "").strip()[:200] or f"HTTP {c.status_code}")
-    return out
+        # models 200 = key 被接受；chat 失败是容量/上游/请求体问题 ⇒ 降级但可用
+        return {"ok": False, "authenticated": True, "degraded": True,
+                "inconclusive": False, "status": 200,
+                "chat_status": chat_status, "model": body["model"],
+                "models": models, "error": chat_err,
+                "elapsed": el, "attempts": attempt + 1}
+    return last

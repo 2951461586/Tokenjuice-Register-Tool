@@ -220,6 +220,9 @@ def main() -> int:
     ap.add_argument("--no-skip-keyed", action="store_true",
                     help="resume 时不跳过台账里已有 api_key 的邮箱（通常要与 "
                          "--rotate-key 一起用）")
+    ap.add_argument("--no-confirm-session", action="store_true",
+                    help="登录后不再 GET /auth/me 确认会话（省 ~0.24s/号；"
+                         "会话失效由随后的 GET /api-key 401 兜住）")
     ap.add_argument("--json", default="", help="把结果写到这个文件")
     ap.add_argument("--doctor", action="store_true", help="只做环境体检")
     args = ap.parse_args()
@@ -237,7 +240,8 @@ def main() -> int:
         return cmd_scan()
 
     pipe = Pipeline(backend=args.mail_backend, domain=args.domain or None,
-                    rotate_key=args.rotate_key)
+                    rotate_key=args.rotate_key,
+                    confirm_session=not args.no_confirm_session)
     kw = {}
     if args.mail_timeout is not None:
         kw["mail_timeout"] = args.mail_timeout

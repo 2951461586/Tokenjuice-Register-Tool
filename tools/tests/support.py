@@ -132,6 +132,9 @@ class _FakeSite:
         self.email = ""
         self.log: list[str] = []
 
+    def reset(self) -> None:
+        """真实客户端会清 Cookie；替身无状态，no-op。"""
+
     def send_magic_link(self, email: str) -> Result:
         _FakeSite.calls.append(("send", email))
         if _FakeSite.fail_send:

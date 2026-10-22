@@ -70,6 +70,17 @@ class TokenJuiceClient:
         self.email = ""
         self.log: list[str] = []
 
+    def reset(self) -> None:
+        """切到下一个账号：清 Cookie / 邮箱 / 日志，但**保留连接池**。
+
+        🔴 复用 Session 是跑批优化（实测冷连接 ~660ms、热连接 ~223ms，
+        省下的是 TLS 握手），但**不清 Cookie 就会串号** —— 上一号的
+        `session` Cookie 会让下一号的 `get_api_key` 查到别人的 key。
+        """
+        self.s.cookies.clear()
+        self.email = ""
+        self.log.clear()
+
     # ── 公共头 ────────────────────────────────────────────────────────
     @staticmethod
     def _headers(referer: str, *, json_body: bool = False) -> dict[str, str]:

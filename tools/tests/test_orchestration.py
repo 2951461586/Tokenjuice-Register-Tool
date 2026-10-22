@@ -56,6 +56,25 @@ def test_full_chain() -> None:
               pipe.ledger.load() == [])
 
 
+def test_full_chain_without_confirm_session() -> None:
+    """`--no-confirm-session` 路径：跳过 /auth/me，但流程仍必须走通。
+
+    这是 2026-10-23 实测抓到的回归：跳过 me 后，末尾日志仍引用局部变量 `me`
+    ⇒ 20/20 全部 `UnboundLocalError`，而默认路径（confirm_session=True）完全正常。
+    自测必须覆盖**这个开关的两侧**，否则「省 0.24s」的优化会以整批失败为代价。
+    """
+    print("\n[orchestration] 跳过 /auth/me 的快速路径")
+    with tempfile.TemporaryDirectory() as td, offline():
+        _FakeTempMailClient.pending = [mail("fake-1@example-mail.test", body=BODY)]
+        rec = _pipe(td, confirm_session=False).run_one()
+        check("状态 keyed", rec.status == "keyed", f"{rec.status} {rec.error}")
+        check("me 阶段记为 skipped", rec.stages.get("me") == "skipped",
+              str(rec.stages))
+        check("me 计时为 0", rec.timings.get("me") == 0.0, str(rec.timings))
+        check("me_email 仍有值（用已知邮箱）",
+              rec.login.get("me_email") == rec.email, str(rec.login))
+
+
 def test_send_failure() -> None:
     print("\n[orchestration] 发信失败的分流")
     with tempfile.TemporaryDirectory() as td, offline():
@@ -210,46 +229,67 @@ class _Sess:
 
 
 def test_apicheck_semantics() -> None:
-    print("\n[apicheck] 验活判据与网络重试")
+    print("\n[apicheck] 验活判据（chat 优先）与网络/5xx 重试")
     import requests
 
     models_ok = _Resp(200, payload={"data": [{"id": "m"}]})
     chat_ok = _Resp(200, payload={"choices": [{"message": {"content": "pong"}}],
                                   "usage": {"total_tokens": 8}})
 
-    s: Any = _Sess([requests.ConnectionError("ssl eof"), models_ok], [chat_ok])
+    # chat 200：最强证据，且**不应再打 models**（gets 队列为空，打了就会 IndexError）
+    s: Any = _Sess([], [chat_ok])
     v = verify_key("tj_x", retries=2, session=s)
-    check("网络层失败会重试（第 2 次成功）",
+    check("chat 200 ⇒ ok/authenticated", v["ok"] and v["authenticated"], str(v))
+    check("chat 200 时跳过 models（省一次 RTT）", v["models"] == [], str(v["models"]))
+
+    # chat 网络抖动：重试后成功
+    s = _Sess([], [requests.ConnectionError("ssl eof"), chat_ok])
+    v = verify_key("tj_x", retries=2, session=s)
+    check("chat 网络失败会重试（第 2 次成功）",
           v["ok"] and v["attempts"] == 2, str(v))
-    check("chat 200 是最强证据", v["chat_status"] == 200)
 
-    s: Any = _Sess([_Resp(401, "Unauthorized")])
+    # chat 401：确定性失败，不打 models
+    s = _Sess([], [_Resp(401, "Unauthorized")])
     v = verify_key("tj_x", retries=2, session=s)
-    check("401 是确定性失败，**不重试**",
-          not v["ok"] and v["status"] == 401 and v["attempts"] == 1, str(v))
+    check("chat 401 是确定性失败，不重试也不打 models",
+          not v["authenticated"] and v["status"] == 401 and v["attempts"] == 1,
+          str(v))
 
-    s: Any = _Sess([models_ok], [_Resp(429, "rate limited")])
+    # chat 429 + models 200：key 有效，容量问题
+    s = _Sess([models_ok], [_Resp(429, "rate limited")])
     v = verify_key("tj_x", session=s)
-    check("models 200 = 已认证（交付判据）", v["authenticated"] is True)
+    check("chat 429 + models 200 ⇒ 已认证（交付判据）", v["authenticated"] is True)
     check("chat 429 = 降级，不是 key 失效",
           v["degraded"] is True and v["ok"] is False, str(v))
 
-    s: Any = _Sess([models_ok], [_Resp(403, "Forbidden")])
+    # chat 400（请求体/模型名问题）+ models 200：key 仍然有效
+    s = _Sess([models_ok], [_Resp(400, "bad model")])
     v = verify_key("tj_x", session=s)
-    check("chat 403 是确定性失败", v["ok"] is False and v["degraded"] is False, str(v))
+    check("chat 400 不等于 key 失效（models 200 兜住）",
+          v["authenticated"] is True and v["chat_status"] == 400, str(v))
 
-    s: Any = _Sess([requests.ConnectionError("dns")] * 3)
+    # chat 403：确定性失败
+    s = _Sess([], [_Resp(403, "Forbidden")])
+    v = verify_key("tj_x", session=s)
+    check("chat 403 是确定性失败",
+          v["ok"] is False and v["degraded"] is False and v["authenticated"] is False,
+          str(v))
+
+    # 两层都网络失败：不确定，而不是「key 失效」
+    s = _Sess([requests.ConnectionError("dns")] * 3,
+              [requests.ConnectionError("dns")] * 3)
     v = verify_key("tj_x", retries=2, session=s)
-    check("重试耗尽时 status=0（与「key 失效」区分）",
-          v["status"] == 0 and v["attempts"] == 3, str(v))
+    check("两层都网络失败 ⇒ inconclusive + status=0",
+          v["inconclusive"] is True and v["status"] == 0, str(v))
 
     # 🔴 实测踩过的坑：models 偶发 500，旧实现直接判「不可用」⇒ 可用 key 从交付物消失
-    s: Any = _Sess([_Resp(500, "Internal Server Error"), models_ok], [chat_ok])
+    s = _Sess([_Resp(500, "Internal Server Error"), models_ok],
+              [_Resp(429, "rate limited")])
     v = verify_key("tj_x", retries=2, session=s)
-    check("models 500 会重试（第 2 次 200 ⇒ 可用）",
-          v["ok"] and v["attempts"] == 2, str(v))
+    check("models 500 会重试（第 2 次 200 ⇒ 已认证）",
+          v["authenticated"] and v["attempts"] == 2, str(v))
 
-    s = _Sess([_Resp(503, "unavailable")] * 3)
+    s = _Sess([_Resp(503, "unavailable")] * 3, [_Resp(429, "rate limited")])
     v = verify_key("tj_x", retries=2, session=s)
     check("models 持续 5xx ⇒ inconclusive，不是「key 失效」",
           v["inconclusive"] is True and v["status"] == 503, str(v))
