@@ -137,7 +137,8 @@ status=keyed
 | --- | --- | --- | --- | --- |
 | 首批 | 101 s | 5.82 s | ✅ | 无细分计时 |
 | 优化前基线 | 89 s | 5.21 s | ✅ | 加细分计时 |
-| 优化后 | **63 s** | **3.60 s** | ✅ | 连接复用 + chat 优先 + 跳过 `/auth/me` |
+| 优化后（`--no-confirm-session`） | **63 s** | **3.60 s** | ✅ | 连接复用 + chat 优先 + 跳过 `/auth/me` |
+| 复跑（默认，含 `/auth/me`） | 67 s | 3.85 s | ✅ | 见 `docs/run-50-batch-repeat.md` |
 
 - `verify_keys.py`：`models=200 chat=200 model=deepseek-ai/DeepSeek-V4.1-Flash-1017`
 - 轮换护栏实测：对同一账号 `--no-skip-keyed` 重跑 → `status=partial`，
