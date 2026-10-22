@@ -1,14 +1,15 @@
 # 密钥与隐私暴露面审计（2026-10-23）
 
-范围：本仓库工作区 + git 历史 + 被 gitignore 的运行产物 + 两个 HAR。
+范围：本仓库工作区 + git 历史 + 被 gitignore 的运行产物 + 两个 HAR
+（HAR 已于 2026-10-23 删除，见 §5）。
 方法：`git ls-files` / `git grep HEAD` / `git log -p --all` / 全盘正则扫描 /
 `icacls` / 对 HAR 里的凭据做**只读**验活（`GET /v1/models`）。
 
 ## 结论（按严重度）
 
 | # | 级别 | 发现 | 证据 | 状态 |
-|---|---|---|---|---|
-| 1 | 🔴 高 | **HAR 里有 1 把仍然有效的明文 key** | `tokenjuice-2.ai.har` 含 `tj_<redacted>`，`GET /v1/models` 返回 **200** | **待处置**：见 §3 |
+| --- | --- | --- | --- | --- |
+| 1 | 🔴 高 | **HAR 里有 1 把仍然有效的明文 key** | `tokenjuice-2.ai.har` 含 `tj_<redacted>`，`GET /v1/models` 返回 **200** | 文件已删除；**key 仍有效 → 轮换**（§3） |
 | 2 | 🔴 高 | **Worker Admin Key 已在本对话中明文出现** | 用户消息 + `.env` | 建议轮换（§3） |
 | 3 | 🟠 中 | `.env` / `result/` / `exports/` / HAR 的 ACL 为 `BUILTIN\Users:(F)`，本机任意用户可读写 | `icacls` | ✅ 已收紧为 `LIZI\29514:(F)` |
 | 4 | 🟠 中 | 运行日志打印 **key 前 20 字符**（50 条） | `exports/run50.log` | ✅ 代码改为只打 suffix；旧日志已脱敏 |
@@ -29,26 +30,25 @@
 ## 2. 运行产物（gitignored，但在磁盘上）
 
 | 文件 | 内容 | 风险 |
-|---|---|---|
+| --- | --- | --- |
 | `.env` | Worker Admin Key | 可建任意邮箱、读全表邮件 |
 | `exports/ledger.jsonl` | 51 条账号 + 明文 key + 邮件元数据 | 凭据 |
 | `exports/run50.json` | 50 条完整记录（含明文 key） | 凭据 |
 | `exports/*.log` | 邮箱、耗时；**已脱敏** | 低 |
 | `result/keys.txt` / `apikeys.txt` / `keys_verified.json` / `success.jsonl` | 51 把明文 key | 交付凭据 |
-| `tokenjuice-2.ai.har` | **1 把有效 key** + 邮箱 + 一次性 token | 🔴 见 §3 |
-| `tokenjuice-1.ai.har` | 邮箱 + 一次性 token（已过期） | 低 |
+| `tokenjuice-2.ai.har` | **1 把有效 key** + 邮箱 + 一次性 token | ✅ 已于 2026-10-23 删除（key 仍有效，见 §3） |
+| `tokenjuice-1.ai.har` | 邮箱 + 一次性 token（已过期） | ✅ 已于 2026-10-23 删除 |
 
-> `.har` 是用户提供的原始证据，本项目**没有删除或改写**它。
+> 两个 `.har` 已按用户要求于 2026-10-23 **删除**。
+> ⚠️ 删除文件**不等于吊销 key** —— `tj_<redacted>` 仍然有效，见 §3。
 > 但它是「分享抓包」场景里最容易被忽略的凭据泄漏点：响应体里就有明文 key。
 
 ## 3. 待处置（需要人决定，工具不自动做）
 
-1. **HAR 里那把 key**：`tj_<redacted>`（账号 `epsoft01@liziai.cloud`）当前仍然有效。
-   两种处置，任选其一：
-   - 轮换（会**立刻作废**这把 key）：
-     `python tools/run_e2e.py --mode resume --email epsoft01@liziai.cloud --no-skip-keyed --rotate-key`
-   - 或者确认不再使用该账号后，删除/移走 HAR，并停用该 key（站点侧无独立吊销接口，
-     只能靠轮换）。
+1. **HAR 里那把 key**：`tj_<redacted>`（账号 `epsoft01@liziai.cloud`）。
+   HAR 文件已删除，但**这把 key 仍然有效**；站点没有独立吊销接口，只能轮换：
+   `python tools/run_e2e.py --mode resume --email epsoft01@liziai.cloud --no-skip-keyed --rotate-key`
+   ⚠️ 如果这把 key 正被其它系统使用，轮换前先改下游配置。
    ⚠️ 如果这把 key 正被其它系统使用，轮换前先改下游配置。
 2. **Worker Admin Key**：已在聊天中明文出现 ⇒ 按「已泄漏」处理，去 Cloudflare 侧
    重建/轮换，更新 `.env` 后跑 `python tools/run_e2e.py --doctor` 复验。

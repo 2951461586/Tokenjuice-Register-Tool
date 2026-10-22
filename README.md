@@ -4,15 +4,16 @@ Token Juice（`tokenjuice.ai`）全链路注册机：**CF Worker 私域邮箱建
 收信取 token → 验证激活 → 创建 API Key → 网关验活 → 入库**。纯 HTTP，无浏览器、
 无验证码、无第三方依赖（只要 `requests`）。
 
-规格真源：本目录下两个 HAR（`tokenjuice-1.ai.har` / `tokenjuice-2.ai.har`）+
-站点前端 SDK 原文（`assets/api-DoqthcYR.js`）。所有端点、Cookie、错误码都经过
-2026-10-22 的实测复核，不是从 HAR 猜的。
+规格真源：原始抓包（`tokenjuice-1.ai.har` / `tokenjuice-2.ai.har`，已于 2026-10-23
+按安全审计删除，见 `docs/security-audit.md`）+ 站点前端 SDK 原文
+（`assets/api-DoqthcYR.js`）。所有端点、Cookie、错误码都经过 2026-10-22 的
+实测复核，不是从 HAR 猜的。
 
 ---
 
 ## 1. 链路
 
-```
+```text
 ① 建邮箱        POST {TEMPMAIL_BASE}/api/mailboxes           Authorization: Bearer <admin key>
                  → oai-xxxxxxxx@liziai.cloud
 ② 发登录链接    POST https://tokenjuice.ai/api/v1/send-magic-link   {"email": ...}   → 204
@@ -51,7 +52,7 @@ python tools/selftest.py                  # 离线自测（81 项，不碰网络
 产物：
 
 | 路径 | 内容 |
-|---|---|
+| --- | --- |
 | `exports/ledger.jsonl` | 运行台账：**全部尝试**（含失败），按邮箱合并、等级保护 |
 | `exports/run*.json` | `--json` 指定的单次结果 |
 | `result/success.jsonl` | 成功账号（账号级，每邮箱一行） |
@@ -88,7 +89,7 @@ python tools/selftest.py                  # 离线自测（81 项，不碰网络
 ## 4. 错误码分流（每一条都实测过）
 
 | 场景 | 响应 | 处置 |
-|---|---|---|
+| --- | --- | --- |
 | 发信邮箱格式错 | `400 Invalid email address` | 换地址，不要重试 |
 | 链接已用/过期 | `400 Invalid or expired sign-in link` | 重新发信（15 分钟窗口） |
 | verify 请求体不对 | `400 Invalid request body` | 站点改了 schema，改 `tokenjuice.verify` 的键集 |
@@ -101,7 +102,7 @@ python tools/selftest.py                  # 离线自测（81 项，不碰网络
 
 ## 5. 模块
 
-```
+```text
 src/config.py       .env 加载 + 常量 + validate()
 src/parsing.py      邮件正文 → token（纯函数，零第三方依赖）
 src/mailrules.py    收件规则（SES 发件人 + 主题双条件）+ 漏网主题诊断
@@ -123,7 +124,7 @@ tools/selftest.py   离线自测入口（测试本体在 tools/tests/）
 
 单号（2026-10-22）：
 
-```
+```text
 [signup] 邮箱 oai-xxxxxxxx@liziai.cloud
 [login]  会话建立 (3.1s) me=oai-xxxxxxxx@liziai.cloud
 [api_key] key 已建 suffix=xxxx 验活=chat (0.5s + 1.4s)
@@ -133,7 +134,7 @@ status=keyed
 50 号 @3 并发（2026-10-23，两次）：
 
 | 版本 | 墙钟 | 单号 mean | 50/50 | 备注 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 首批 | 101 s | 5.82 s | ✅ | 无细分计时 |
 | 优化前基线 | 89 s | 5.21 s | ✅ | 加细分计时 |
 | 优化后 | **63 s** | **3.60 s** | ✅ | 连接复用 + chat 优先 + 跳过 `/auth/me` |
