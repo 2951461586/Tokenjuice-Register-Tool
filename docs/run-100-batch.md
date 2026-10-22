@@ -22,7 +22,7 @@ python tools/run_e2e.py --count 100 --concurrency 3 --json exports/run100.json
 阶段分解（mean）：
 
 | 阶段 | mean | p90 | 说明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `mailbox` | 0.20 s | 0.19 s | Worker 连接按 worker 复用 |
 | `send` | 0.42 s | 0.48 s | 站点连接复用（省 TLS） |
 | `mail_wait` | 1.07 s | 1.09 s | SES 投递 |
@@ -35,7 +35,7 @@ python tools/run_e2e.py --count 100 --concurrency 3 --json exports/run100.json
 ## 稳定性（按 25 号分段）
 
 | 分段 | 单号 mean | max |
-|---|---|---|
+| --- | --- | --- |
 | 1–25 | 4.19 s | 6.57 s |
 | 26–50 | 3.67 s | 4.31 s |
 | 51–75 | 3.61 s | 4.36 s |
@@ -50,7 +50,7 @@ python tools/run_e2e.py --count 100 --concurrency 3 --json exports/run100.json
 ## 与 50 批次的对比
 
 | 轮次 | 规模 | 墙钟 | 单号 mean | 成功率 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 50（默认，上一轮） | 50 | 67 s | 3.85 s | 50/50 |
 | **100（本轮，默认）** | **100** | **129 s** | **3.78 s** | **100/100** |
 
