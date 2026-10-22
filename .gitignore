@@ -1,0 +1,32 @@
+# 凭据 —— 用通配，不要逐条列举（`.env.bak-xxx` 这类备份一定漏）
+.env
+.env.*
+!.env.example
+
+# 运行产物：台账 / 导出 / 探针输出
+*.json
+*.jsonl
+*.csv
+*.log
+exports/
+# ⚠️ 上面 `*.json` 是给**运行产物**用的，但静态检查配置也是 .json：
+#    不显式放行的话，`pyrightconfig.json` 会被一起忽略 ⇒ 换台机器克隆后
+#    导入解析全红，而仓库里看不出缺了什么。
+!pyrightconfig.json
+!**/pyrightconfig.json
+
+# 🔴 成功数据（交付物）：含明文 API Key。
+# 必须显式列目录 —— `*.txt` 没有任何通配规则覆盖，
+# 光靠上面的 *.json / *.jsonl 挡不住 result/keys.txt。
+result/
+
+# HAR / EML：含会话与一次性 token（通配已覆盖，这里显式列目录是为了可读）
+*.har
+*.eml
+evidence/
+.har_extract/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
