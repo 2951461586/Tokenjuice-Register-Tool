@@ -62,5 +62,13 @@ python tools/run_e2e.py --count 100 --concurrency 3 --json exports/run100.json
 ## 结论
 
 100 号规模下链路稳定：**129 s / 3.78 s 单号 / 100% 成功 / 0 重试**。
-所有 key 在创建时已逐把验活（`chat 200`），交付物仍按 `result/` 的约定生成
-（该目录 gitignored，不入库）。
+所有 key 在创建时已逐把验活（`chat 200`）。
+
+交付物是**两步**：
+
+1. 跑批阶段：`result/success.jsonl` 自动追加（账号级，本批 100 条）；
+2. 导出阶段：`python tools/verify_keys.py` 逐把独立复验后写出
+   `result/keys.txt` / `apikeys.txt` / `keys_verified.json`。
+
+本轮补跑导出：**341 / 341 可用**（含历史账号，377 s），
+`result/` 整体 gitignored，不入库。

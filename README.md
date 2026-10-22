@@ -45,7 +45,7 @@ python tools/run_e2e.py --count 5 --concurrency 2
 python tools/run_e2e.py --count 50 --concurrency 3 --no-confirm-session   # 跑批（省 /auth/me）
 python tools/run_e2e.py --mode resume --email a@b.com      # 对已知邮箱重跑（丢包/过期）
 python tools/run_e2e.py --mode scan       # 只读诊断：窗口内邮件按规则分桶 + 漏网主题
-python tools/verify_keys.py               # 验收全部 key 并导出 result/
+python tools/verify_keys.py               # 验收全部 key 并导出 result/（跑批后必跑）
 python tools/selftest.py                  # 离线自测（81 项，不碰网络）
 ```
 
@@ -55,8 +55,8 @@ python tools/selftest.py                  # 离线自测（81 项，不碰网络
 | --- | --- |
 | `exports/ledger.jsonl` | 运行台账：**全部尝试**（含失败），按邮箱合并、等级保护 |
 | `exports/run*.json` | `--json` 指定的单次结果 |
-| `result/success.jsonl` | 成功账号（账号级，每邮箱一行） |
-| `result/keys.txt` | `email----api_key----suffix`（人可读） |
+| `result/success.jsonl` | 成功账号（账号级，每邮箱一行）—— **跑批时自动写** |
+| `result/keys.txt` | `email----api_key----suffix`（人可读）—— 由 `verify_keys.py` 生成 |
 | `result/keys_verified.json` | 机器可读验收结果（models/chat 两层） |
 | `result/apikeys.txt` | 纯 `api_key`，一行一个 |
 

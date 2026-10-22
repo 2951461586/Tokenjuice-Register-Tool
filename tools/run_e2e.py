@@ -184,6 +184,10 @@ def report(recs: list[AccountRecord], *, json_path: str = "") -> int:
 
     led = Ledger(config.LEDGER_PATH)
     print(f"\n  台账 {config.LEDGER_PATH} 现有 {len(led.load())} 条")
+    print(f"  成功台账 {config.SUCCESS_LEDGER_PATH}（账号级，建 key 时已写入）")
+    print("\n  提示：本批只写 success.jsonl；要生成/刷新 result/keys.txt、"
+          "apikeys.txt、keys_verified.json，\n"
+          "        请再跑一次 `python tools/verify_keys.py`（会逐把独立复验后导出）。")
 
     if json_path:
         Path(json_path).parent.mkdir(parents=True, exist_ok=True)
