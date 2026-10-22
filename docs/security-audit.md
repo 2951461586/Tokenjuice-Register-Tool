@@ -45,9 +45,9 @@
 
 ## 3. 待处置（需要人决定，工具不自动做）
 
-1. **HAR 里那把 key**：`tj_<redacted>`（账号 `epsoft01@liziai.cloud`）。
+1. **HAR 里那把 key**：`tj_<redacted>`（账号 `epsoft01@<your-domain>`；公开仓库不写完整地址）。
    HAR 文件已删除，但**这把 key 仍然有效**；站点没有独立吊销接口，只能轮换：
-   `python tools/run_e2e.py --mode resume --email epsoft01@liziai.cloud --no-skip-keyed --rotate-key`
+   `python tools/run_e2e.py --mode resume --email <该账号> --no-skip-keyed --rotate-key`
    ⚠️ 如果这把 key 正被其它系统使用，轮换前先改下游配置。
    ⚠️ 如果这把 key 正被其它系统使用，轮换前先改下游配置。
 2. **Worker Admin Key**：已在聊天中明文出现 ⇒ 按「已泄漏」处理，去 Cloudflare 侧

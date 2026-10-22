@@ -6,7 +6,7 @@
 |---|---|
 | 命令 | `python tools/run_e2e.py --count 50 --concurrency 3 --json exports/run50.json` |
 | 邮箱后端 | CF Temp Email Worker（子域见 `.env` 的 `TEMPMAIL_BASE`） |
-| 邮箱域名 | `liziai.cloud` |
+| 邮箱域名 | `<your-domain>`（见 `.env` 的 `TEMPMAIL_DOMAIN`） |
 | 登录模式 | 魔法链接（`#token=`，一次性 / 15 分钟） |
 | 验活 | `GET /v1/models` + `POST /v1/chat/completions`（`max_tokens=8`） |
 | 结果文件 | `exports/run50.json`（gitignored，含凭据） |

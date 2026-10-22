@@ -15,7 +15,7 @@ Token Juice（`tokenjuice.ai`）全链路注册机：**CF Worker 私域邮箱建
 
 ```text
 ① 建邮箱        POST {TEMPMAIL_BASE}/api/mailboxes           Authorization: Bearer <admin key>
-                 → oai-xxxxxxxx@liziai.cloud
+                 → oai-xxxxxxxx@<your-domain>
 ② 发登录链接    POST https://tokenjuice.ai/api/v1/send-magic-link   {"email": ...}   → 204
 ③ 收信取 token  GET  {TEMPMAIL_BASE}/api/inbox?email=...（索引端点，只读 0~2 行）
                  邮件主题：Your Token Juice sign-in link
@@ -125,8 +125,8 @@ tools/selftest.py   离线自测入口（测试本体在 tools/tests/）
 单号（2026-10-22）：
 
 ```text
-[signup] 邮箱 oai-xxxxxxxx@liziai.cloud
-[login]  会话建立 (3.1s) me=oai-xxxxxxxx@liziai.cloud
+[signup] 邮箱 oai-xxxxxxxx@<your-domain>
+[login]  会话建立 (3.1s) me=oai-xxxxxxxx@<your-domain>
 [api_key] key 已建 suffix=xxxx 验活=chat (0.5s + 1.4s)
 status=keyed
 ```
