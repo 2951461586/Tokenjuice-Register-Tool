@@ -21,7 +21,7 @@ python tools/run_e2e.py --count 50 --concurrency 3 --json exports/run50c.json
 阶段分解（mean）：
 
 | 阶段 | mean | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `mailbox` | 0.24 s | Worker 连接按 worker 复用 |
 | `send` | 0.45 s | 站点连接复用（省 TLS） |
 | `mail_wait` | 0.99 s | SES 投递 |
@@ -34,7 +34,7 @@ python tools/run_e2e.py --count 50 --concurrency 3 --json exports/run50c.json
 ## 与前三轮对比
 
 | 轮次 | 墙钟 | 单号 mean | 说明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 首批（旧代码） | 101 s | 5.82 s | 无细分计时 |
 | 第二批（旧代码 + 计时） | 89 s | 5.21 s | 定位到连接未复用 |
 | 优化后（`--no-confirm-session`） | 63 s | 3.60 s | 跳过 `/auth/me` |
