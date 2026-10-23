@@ -140,6 +140,7 @@ status=keyed
 | 优化后（`--no-confirm-session`） | **63 s** | **3.60 s** | ✅ | 连接复用 + chat 优先 + 跳过 `/auth/me` |
 | 复跑（默认，含 `/auth/me`） | 67 s | 3.85 s | ✅ | 见 `docs/run-50-batch-repeat.md` |
 | **100 批复跑（默认）** | **129 s** | **3.78 s** | ✅ | 见 `docs/run-100-batch.md` |
+| 累计 **400** 条成功记录 | — | 3.72 s（补 59 条） | ✅ | 见 `docs/run-400.md` |
 
 - `verify_keys.py`：`models=200 chat=200 model=deepseek-ai/DeepSeek-V4.1-Flash-1017`
 - 轮换护栏实测：对同一账号 `--no-skip-keyed` 重跑 → `status=partial`，
